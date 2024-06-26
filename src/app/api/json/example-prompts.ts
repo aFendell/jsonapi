@@ -10,7 +10,7 @@ export const EXAMPLE_PROMPT = `DATA: \n"John is 25 years old and studies compute
 }
 \n\n-----------\nValid JSON output in expected format:`;
 
-export const EXAMPLE_ANSWER = `{
+export const EXAMPLE_RESPONSE = `{
 name: "John",
 age: 25,
 isStudent: true,

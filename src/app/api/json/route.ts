@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ZodTypeAny, z } from 'zod';
 
-import { openai } from '@/lib/openai';
-import { EXAMPLE_ANSWER, EXAMPLE_PROMPT } from './example';
-import { ASSISTANT_PROMPT } from './assistant-prompt';
+import { EXAMPLE_RESPONSE, EXAMPLE_PROMPT } from './example-prompts';
+import { MODEL_PROMPT } from './model-prompt';
+import { genAI } from '@/lib/gemini-ai';
 
 type PromiseExecutor<T> = (
   resolve: (value: T) => void,
@@ -28,7 +28,6 @@ class RetryablePromise<T> extends Promise<T> {
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
-  // step1: make sure incoming request is valid => data & format
   const genericSchema = z.object({
     data: z.string(),
     format: z.object({}).passthrough(),
@@ -36,49 +35,43 @@ export async function POST(req: NextRequest) {
 
   const { data, format } = genericSchema.parse(body);
 
-  // step 2: create schema from the expected user format
   const dynamicSchema = jsonSchemaToZod(format);
 
-  // step 3: retry mechanism
   const validationResult = await RetryablePromise.retry<object>(
     3,
     async (resolve, reject) => {
       try {
-        // call ai
+        const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-        const content = `DATA: \n"${data}"\n\n-----------\nExpected JSON format: 
+        const userContent = `DATA: \n"${data}"\n\n-----------\nExpected JSON format:
         ${JSON.stringify(format, null, 2)}
         \n\n-----------\nValid JSON output in expected format:`;
 
-        // Currently getting
-        // Error: 429 You exceeded your current quota, please check your plan and billing details.
-        // TODO: Check openai docs / billing OR switch to a different ai solution.
-        const res = await openai.chat.completions.create({
-          model: 'gpt-3.5-turbo',
-          messages: [
+        const result = await model.generateContent({
+          contents: [
             {
-              role: 'assistant',
-              content: ASSISTANT_PROMPT,
+              role: 'model',
+              parts: [{ text: MODEL_PROMPT }],
             },
             {
               role: 'user',
-              content: EXAMPLE_PROMPT,
+              parts: [{ text: EXAMPLE_PROMPT }],
             },
             {
               role: 'user',
-              content: EXAMPLE_ANSWER,
+              parts: [{ text: EXAMPLE_RESPONSE }],
             },
             {
               role: 'user',
-              content,
+              parts: [{ text: userContent }],
             },
           ],
         });
 
-        // text content from openai response
-        const text = res.choices[0].message.content;
+        const response = await result.response;
 
-        // validate json
+        const text = response.text();
+
         const validationResult = dynamicSchema.parse(JSON.parse(text || ''));
 
         return resolve(validationResult);
